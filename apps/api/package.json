@@ -1,0 +1,44 @@
+{
+  "name": "@enterprise-copilot/api",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
+  },
+  "scripts": {
+    "build": "npm run prisma:generate && nest build",
+    "start": "node dist/main.js",
+    "prestart:dev": "npm run prisma:generate",
+    "start:dev": "nest start --watch",
+    "typecheck": "npm run prisma:generate && tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.cjs",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:format": "prisma format",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:status": "prisma migrate status"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.5.0",
+    "@nestjs/config": "^12.1.1",
+    "@nestjs/core": "^12.5.0",
+    "@nestjs/platform-express": "^12.5.0",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dotenv": "^18.0.10",
+    "pg": "^8.23.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^12.0.13",
+    "@nestjs/testing": "^12.5.0",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "prisma": "^7.10.1",
+    "typescript": "5.9"
+  }
+}
