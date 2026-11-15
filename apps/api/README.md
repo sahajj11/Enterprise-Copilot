@@ -70,6 +70,20 @@ The existing `20261115055914_add_documents` migration defines the table. If it h
 
 `npm test` also exercises multipart uploads with temporary local storage and a mocked database, including file validation, size limits, safe filenames, and cleanup on persistence failure.
 
+## PDF text extraction
+
+`POST /documents/:id/process` reads an existing document's local file and returns HTTP 200 with `{ documentId, pageCount, text, characterCount }`.
+
+```sh
+curl -X POST http://localhost:3000/documents/YOUR_DOCUMENT_UUID/process
+```
+
+Use `curl.exe` in PowerShell. No request body is needed. `pdf-parse` 2.x extracts text from all pages using `PDFParse.getText()`; parser resources are released with `destroy()` in a `finally` block. Page-number decorations are omitted, outer whitespace is trimmed, and `characterCount` is the returned string's JavaScript length (UTF-16 code units).
+
+Invalid UUIDs return 400. Missing database records or local files return 404. Corrupt/invalid or password-protected PDFs return 422. Other file-read or extraction failures return 500 without exposing local file paths. PDFs without selectable text return empty text and a zero character count; no OCR is performed.
+
+Processing does not modify uploads, store extracted text, or require a schema migration. Tests use the real parser for multi-page, empty-text, and corrupt PDFs, with mocked database lookups.
+
 ## Structure
 
 - `src/app.module.ts`: global environment configuration and module composition.

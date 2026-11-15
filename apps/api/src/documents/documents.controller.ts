@@ -1,4 +1,4 @@
-import { Controller, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, HttpCode, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DocumentsService } from './documents.service';
@@ -6,6 +6,12 @@ import { DocumentsService } from './documents.service';
 @Controller('documents')
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
+
+  @Post(':id/process')
+  @HttpCode(200)
+  process(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.documents.process(id);
+  }
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', {
