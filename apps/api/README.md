@@ -43,6 +43,33 @@ Validation, type checking, generation, and tests do not require a live database.
 
 `prisma:deploy` applies committed migrations and requires credentials for the **target database**; create and commit migrations in development first. `prisma:status` also requires a live database. `npm start` runs the compiled application and needs a valid runtime `DATABASE_URL`. Build with development dependencies installed; the migration job also needs the Prisma CLI, which is a development dependency. Supply production secrets through the environment.
 
+## Document uploads
+
+`POST /documents/upload` accepts one multipart PDF in the `file` field (maximum 10 MB = 10,485,760 bytes). The request must declare `application/pdf`, use a `.pdf` filename (case insensitive), and have the `%PDF-` signature at the start of its content. Signature validation does not parse the PDF or perform text extraction.
+
+```sh
+curl -X POST http://localhost:3000/documents/upload -F "file=@./report.pdf;type=application/pdf"
+```
+
+Use `curl.exe` in Windows PowerShell. A successful upload returns HTTP 201:
+
+```json
+{
+  "id": "be630911-2a5a-4b29-9a77-654908d08682",
+  "originalName": "report.pdf",
+  "size": 12345,
+  "createdAt": "2026-11-15T06:00:00.000Z"
+}
+```
+
+Files are buffered in memory within Multer's size limit, validated, then saved to `apps/api/uploads/` (created automatically). Stored names are generated UUIDs with a `.pdf` suffix; client filenames are metadata only. The directory is ignored by Git and is not served publicly. The API needs filesystem write permission there. Metadata uses the existing `Document` model and stores an absolute local file path. A failed database write removes the uploaded file; cleanup failures are logged. Back up the upload directory alongside the database.
+
+Missing files, invalid PDFs, extra files, and unexpected multipart fields return HTTP 400; oversized uploads return HTTP 413. Storage or database failures return HTTP 500.
+
+The existing `20261115055914_add_documents` migration defines the table. If it has not been applied to your database, run `npm run prisma:deploy` with your PostgreSQL `DATABASE_URL` configured. No new schema migration is needed for this endpoint. Run `npm run prisma:generate` after pulling schema changes, or use the development/build scripts which generate automatically.
+
+`npm test` also exercises multipart uploads with temporary local storage and a mocked database, including file validation, size limits, safe filenames, and cleanup on persistence failure.
+
 ## Structure
 
 - `src/app.module.ts`: global environment configuration and module composition.
