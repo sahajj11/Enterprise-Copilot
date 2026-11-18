@@ -9,6 +9,7 @@ const { Test } = require('@nestjs/testing');
 const { PDFParse, PasswordException } = require('pdf-parse');
 const { DocumentsModule } = require('../dist/documents/documents.module');
 const { PrismaService } = require('../dist/prisma/prisma.service');
+const { RecursiveCharacterTextSplitter } = require('@langchain/textsplitters');
 
 // Small, valid two-page PDF with a real cross-reference table; no fixture dependency.
 function makePdf(texts) {
@@ -51,8 +52,51 @@ test('PDF processing endpoint', async (t) => {
   });
   await app.listen(0, '127.0.0.1');
   const request = async (documentId = id) => fetch(`${await app.getUrl()}/documents/${documentId}/process`, { method: 'POST' });
+  const chunkRequest = async (documentId = id) => fetch(`${await app.getUrl()}/documents/${documentId}/chunk`, { method: 'POST' });
+
+  await t.test('chunk endpoint propagates invalid IDs and missing records/files', async () => {
+    assert.equal((await chunkRequest('invalid')).status, 400);
+    assert.equal((await chunkRequest(randomUUID())).status, 404);
+    assert.equal((await chunkRequest()).status, 404);
+  });
+
+  await t.test('chunk endpoint extracts real PDF pages and returns ordered bounded chunks', async () => {
+    const pages = Array.from({ length: 30 }, (_, i) => `Page ${String(i).padStart(2, '0')}: Some readable PDF text for chunking verification.`);
+    await writeFile(filePath, makePdf(pages));
+    const extracted = await (await request()).json();
+    const response = await chunkRequest();
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.documentId, id);
+    assert.equal(result.chunkSize, 1000);
+    assert.equal(result.chunkOverlap, 200);
+    assert.equal(result.totalChunks, result.chunks.length);
+    assert.ok(result.totalChunks > 1);
+    let previousStart = -1;
+    for (const [index, chunk] of result.chunks.entries()) {
+      assert.equal(chunk.index, index);
+      assert.equal(chunk.characterCount, chunk.text.length);
+      assert.ok(chunk.characterCount > 0 && chunk.characterCount <= 1000);
+      const start = extracted.text.indexOf(chunk.text, previousStart + 1);
+      assert.ok(start > previousStart);
+      previousStart = start;
+    }
+  });
+
+  await t.test('chunk endpoint handles empty PDFs, corrupt PDFs, and splitter failures', async (t) => {
+    await writeFile(filePath, makePdf(['']));
+    const empty = await chunkRequest();
+    assert.equal(empty.status, 200);
+    assert.deepEqual(await empty.json(), { documentId: id, totalChunks: 0, chunkSize: 1000, chunkOverlap: 200, chunks: [] });
+    await writeFile(filePath, '%PDF-1.7\ncorrupt');
+    assert.equal((await chunkRequest()).status, 422);
+    await writeFile(filePath, makePdf(['Readable text']));
+    t.mock.method(RecursiveCharacterTextSplitter.prototype, 'splitText', async () => { throw new Error('Splitter failure'); });
+    assert.equal((await chunkRequest()).status, 500);
+  });
 
   await t.test('returns 400 for invalid UUID and 404 for absent records or files', async () => {
+    await rm(filePath, { force: true });
     assert.equal((await request('invalid')).status, 400);
     assert.equal((await request(randomUUID())).status, 404);
     assert.equal((await request()).status, 404);

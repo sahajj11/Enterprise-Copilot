@@ -84,6 +84,20 @@ Invalid UUIDs return 400. Missing database records or local files return 404. Co
 
 Processing does not modify uploads, store extracted text, or require a schema migration. Tests use the real parser for multi-page, empty-text, and corrupt PDFs, with mocked database lookups.
 
+## PDF text chunking
+
+`POST /documents/:id/chunk` reuses PDF extraction and splits all extracted text with LangChain.js `RecursiveCharacterTextSplitter` (`@langchain/textsplitters`), configured with `chunkSize: 1000` and `chunkOverlap: 200`.
+
+```sh
+curl -X POST http://localhost:3000/documents/YOUR_DOCUMENT_UUID/chunk
+```
+
+Use `curl.exe` in PowerShell. No body is needed. HTTP 200 returns `{ documentId, totalChunks, chunkSize: 1000, chunkOverlap: 200, chunks }`; each chunk contains a zero-based `index`, `text`, and `characterCount`. Chunks remain in source order. Counts use JavaScript string length (UTF-16 code units).
+
+The splitter prefers paragraph, newline, and word boundaries before splitting individual characters. Chunk size is an upper bound; 200 is the overlap target, not a guarantee for every adjacent pair. Boundary-aligned chunks may overlap less or not at all. Tests verify exact 200-character overlap for long unbroken text and reduced overlap at paragraph boundaries.
+
+Empty extracted text returns `totalChunks: 0` and `chunks: []`. Extraction errors retain the processing endpoint's 400/404/422/500 behavior; unexpected splitting failures return 500. No chunks or extracted text are persisted. No embeddings, vector storage, or LLM calls are performed. The reusable helper is `src/documents/text-chunking.ts`.
+
 ## Structure
 
 - `src/app.module.ts`: global environment configuration and module composition.

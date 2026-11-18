@@ -4,6 +4,7 @@ import { mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { FormatError, InvalidPDFException, PasswordException, PDFParse } from 'pdf-parse';
+import { CHUNK_OVERLAP, CHUNK_SIZE, chunkText } from './text-chunking';
 
 @Injectable()
 export class DocumentsService {
@@ -11,6 +12,24 @@ export class DocumentsService {
   private readonly uploadsDirectory = resolve(__dirname, '../../uploads');
 
   constructor(private readonly prisma: PrismaService) {}
+
+  async chunk(id: string) {
+    // Reuse metadata lookup, file reading, extraction, errors, and parser cleanup.
+    const extracted = await this.process(id);
+    try {
+      const chunks = await chunkText(extracted.text);
+      return {
+        documentId: extracted.documentId,
+        totalChunks: chunks.length,
+        chunkSize: CHUNK_SIZE,
+        chunkOverlap: CHUNK_OVERLAP,
+        chunks,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to chunk document ${id}`, error);
+      throw new InternalServerErrorException('Unable to chunk document text');
+    }
+  }
 
   async process(id: string) {
     const document = await this.prisma.document.findUnique({ where: { id } });

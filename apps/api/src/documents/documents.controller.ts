@@ -7,6 +7,12 @@ import { DocumentsService } from './documents.service';
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
+  @Post(':id/chunk')
+  @HttpCode(200)
+  chunk(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.documents.chunk(id);
+  }
+
   @Post(':id/process')
   @HttpCode(200)
   process(@Param('id', new ParseUUIDPipe()) id: string) {
