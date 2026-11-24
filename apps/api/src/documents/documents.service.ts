@@ -5,13 +5,33 @@ import { extname, join, resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { FormatError, InvalidPDFException, PasswordException, PDFParse } from 'pdf-parse';
 import { CHUNK_OVERLAP, CHUNK_SIZE, chunkText } from './text-chunking';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EmbeddingsService } from '../embeddings/embeddings.service';
 
 @Injectable()
 export class DocumentsService {
   private readonly logger = new Logger(DocumentsService.name);
   private readonly uploadsDirectory = resolve(__dirname, '../../uploads');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embeddings: EmbeddingsService,
+  ) {}
+
+  async embed(id: string) {
+    const document = await this.chunk(id);
+    const vectors = await this.embeddings.embedTexts(document.chunks.map(chunk => chunk.text));
+    return {
+      documentId: document.documentId,
+      totalChunks: document.totalChunks,
+      model: EMBEDDING_MODEL,
+      dimensions: EMBEDDING_DIMENSIONS,
+      embeddings: document.chunks.map((chunk, index) => ({
+        index: chunk.index,
+        text: chunk.text,
+        embedding: vectors[index],
+      })),
+    };
+  }
 
   async chunk(id: string) {
     // Reuse metadata lookup, file reading, extraction, errors, and parser cleanup.

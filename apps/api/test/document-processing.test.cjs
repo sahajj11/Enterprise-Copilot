@@ -9,6 +9,7 @@ const { Test } = require('@nestjs/testing');
 const { PDFParse, PasswordException } = require('pdf-parse');
 const { DocumentsModule } = require('../dist/documents/documents.module');
 const { PrismaService } = require('../dist/prisma/prisma.service');
+const { EmbeddingsService } = require('../dist/embeddings/embeddings.service');
 const { RecursiveCharacterTextSplitter } = require('@langchain/textsplitters');
 
 // Small, valid two-page PDF with a real cross-reference table; no fixture dependency.
@@ -41,9 +42,12 @@ test('PDF processing endpoint', async (t) => {
   const id = randomUUID();
   const filePath = join(directory, 'document.pdf');
   const record = { id, filePath };
+  const embeddingProvider = { embedTexts: async texts => texts.map(() => [1, ...Array(383).fill(0)]) };
   const module = await Test.createTestingModule({ imports: [DocumentsModule] })
     .overrideProvider(PrismaService)
     .useValue({ document: { findUnique: async ({ where }) => where.id === id ? record : null } })
+    .overrideProvider(EmbeddingsService)
+    .useValue(embeddingProvider)
     .compile();
   const app = module.createNestApplication({ logger: false });
   t.after(async () => {
@@ -53,6 +57,13 @@ test('PDF processing endpoint', async (t) => {
   await app.listen(0, '127.0.0.1');
   const request = async (documentId = id) => fetch(`${await app.getUrl()}/documents/${documentId}/process`, { method: 'POST' });
   const chunkRequest = async (documentId = id) => fetch(`${await app.getUrl()}/documents/${documentId}/chunk`, { method: 'POST' });
+  const embedRequest = async (documentId = id) => fetch(`${await app.getUrl()}/documents/${documentId}/embed`, { method: 'POST' });
+
+  await t.test('embed endpoint handles invalid IDs and missing records/files', async () => {
+    assert.equal((await embedRequest('invalid')).status, 400);
+    assert.equal((await embedRequest(randomUUID())).status, 404);
+    assert.equal((await embedRequest()).status, 404);
+  });
 
   await t.test('chunk endpoint propagates invalid IDs and missing records/files', async () => {
     assert.equal((await chunkRequest('invalid')).status, 400);
@@ -138,5 +149,34 @@ test('PDF processing endpoint', async (t) => {
     getText.mock.mockImplementation(async () => { throw new Error('Unexpected parser failure'); });
     assert.equal((await request()).status, 500);
     assert.equal(destroy.mock.callCount(), 2);
+  });
+
+  await t.test('embed endpoint reuses chunking and matches vectors to ordered chunks', async () => {
+    await writeFile(filePath, makePdf(Array.from({ length: 30 }, (_, i) => `Page ${i}: Text for reusable local embedding generation.`)));
+    const chunks = await (await chunkRequest()).json();
+    const response = await embedRequest();
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.documentId, id);
+    assert.equal(result.totalChunks, chunks.totalChunks);
+    assert.equal(result.model, 'Xenova/all-MiniLM-L6-v2');
+    assert.equal(result.dimensions, 384);
+    assert.deepEqual(result.embeddings.map(({ index, text }) => ({ index, text })), chunks.chunks.map(({ index, text }) => ({ index, text })));
+    assert.ok(result.embeddings.every(item => item.embedding.length === 384));
+  });
+
+  await t.test('embed endpoint handles empty/corrupt PDFs and model errors', async (t) => {
+    await writeFile(filePath, makePdf(['']));
+    const response = await embedRequest();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { documentId: id, totalChunks: 0, model: 'Xenova/all-MiniLM-L6-v2', dimensions: 384, embeddings: [] });
+    await writeFile(filePath, '%PDF-1.7\ncorrupt');
+    assert.equal((await embedRequest()).status, 422);
+    await writeFile(filePath, makePdf(['Readable text']));
+    const { ServiceUnavailableException, InternalServerErrorException } = require('@nestjs/common');
+    const mock = t.mock.method(embeddingProvider, 'embedTexts', async () => { throw new ServiceUnavailableException(); });
+    assert.equal((await embedRequest()).status, 503);
+    mock.mock.mockImplementation(async () => { throw new InternalServerErrorException(); });
+    assert.equal((await embedRequest()).status, 500);
   });
 });

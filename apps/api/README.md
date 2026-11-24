@@ -98,6 +98,24 @@ The splitter prefers paragraph, newline, and word boundaries before splitting in
 
 Empty extracted text returns `totalChunks: 0` and `chunks: []`. Extraction errors retain the processing endpoint's 400/404/422/500 behavior; unexpected splitting failures return 500. No chunks or extracted text are persisted. No embeddings, vector storage, or LLM calls are performed. The reusable helper is `src/documents/text-chunking.ts`.
 
+## Local embeddings and Postman testing
+
+Install dependencies with `npm ci`. The embedding dependency was installed with `npm install @huggingface/transformers` (4.3.2). On PowerShell use `npm.cmd` if execution policy blocks npm scripts.
+
+1. Start PostgreSQL and the API with `npm run start:dev`.
+2. In Postman, send `POST http://localhost:3000/documents/upload`, choosing Body > form-data, key `file` with type File, and a PDF. Copy the returned `id`, or use an existing uploaded document ID.
+3. Send `POST http://localhost:3000/documents/<id>/embed`. Choose no authorization and no body. Allow extra time on the first request while the model downloads and initializes.
+4. Expect HTTP 200 with `documentId`, `totalChunks`, `model: "Xenova/all-MiniLM-L6-v2"`, `dimensions: 384`, and `embeddings`. Each entry contains `{ index, text, embedding }`, where `embedding` is an array of 384 finite numbers. Indexes and text follow `/chunk` order.
+5. Check a vector's L2 norm (square root of the sum of squared values): it should be approximately 1. Repeated requests reuse the initialized model.
+
+The exported `EmbeddingsModule` provides a reusable `EmbeddingsService.embedTexts(texts)`. It uses a shared initialization promise, retries after failed initialization, mean pooling, normalization, CPU inference, and batches of at most 16 texts. Model resources are released on application shutdown. Each server process has its own model instance. Native dynamic import preserves compatibility with the CommonJS/NodeNext application.
+
+Model files are downloaded from the public Hugging Face repository on first use and cached in `apps/api/.cache/models/` (ignored by Git). Internet access is needed for the initial download; no API key or paid inference is used, and document text is processed locally. Preserve the cache between restarts. Transformers.js may check remote file metadata when loading cached files. The model tokenizer truncates inputs beyond its supported token limit; the existing character-based chunking is unchanged.
+
+Empty text returns HTTP 200 with zero chunks and an empty embeddings array, without model initialization. Invalid UUIDs return 400, missing documents/files 404, corrupt/password-protected PDFs 422, model initialization failures 503, and unexpected extraction/chunking/inference failures 500. No chunks or vectors are persisted and no schema migration is required.
+
+`npm test` runs offline tests with a stubbed inference pipeline. To verify actual local inference, run `npm run build` followed by `node scripts/verify-local-embeddings.cjs`; this may download the model. It checks concurrent calls, 384-dimensional output, normalization, and repeatability. The implementation follows the [model's Transformers.js usage](https://huggingface.co/Xenova/all-MiniLM-L6-v2).
+
 ## Structure
 
 - `src/app.module.ts`: global environment configuration and module composition.

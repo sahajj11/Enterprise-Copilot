@@ -8,3 +8,4 @@ src/generated/prisma/
 *.tsbuildinfo
 *.log
 uploads/
+.cache/models/
